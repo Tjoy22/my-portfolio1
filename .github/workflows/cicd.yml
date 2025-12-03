@@ -63,6 +63,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      
       - name: Render ECS task definition with new image
         id: taskdef
         uses: aws-actions/amazon-ecs-render-task-definition@v1
