@@ -15,7 +15,7 @@ env:
   AWS_REGION: us-east-1
   ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
   ECR_REPO: ${{ secrets.ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/dev
-  IMAGE_TAG: ${{ github.sha }}
+#  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   build:
@@ -34,52 +34,5 @@ jobs:
         with:
           role-to-assume: ${{ secrets.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ env.IMAGE_NAME }} .
-
-      - name: Tag Docker image
-        run: |
-          docker tag ${{ env.IMAGE_NAME }}:latest ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-         
-      - name: Scan Docker image with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-          format: table
-          exit-code: '1' 
-          severity: CRITICAL,HIGH
-
-      - name: Push Docker image to Amazon ECR
-        run: |
-          docker push ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-      
-  ecs_deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          role-to-assume: ${{ secrets.ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Render ECS task definition with new image
-        id: taskdef
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ecs-taskdef.json
-          container-name: nginx
-          image: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-      - name: Deploy to ECS Service
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.taskdef.outputs.task-definition }}
-          cluster: nginx-fargate-cluster
-          service: nginx-fargate-service
-          wait-for-service-stability: true     
+      - name: Check credentials
+        run: aws s3 ls
