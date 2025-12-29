@@ -1,4 +1,4 @@
-name: Utc App ci/cd
+name: utc app cicd
 
 on:
   push:
@@ -7,10 +7,11 @@ on:
     branches: [ "main" ]
 
 permissions:
-      id-token: write
-      contents: read
+  id-token: write
+  contents: read
+
 env:
-  python_version: 3.11
+  PYTHON_VERSION: "3.11"
   IMAGE_NAME: portfolio
   AWS_REGION: us-east-1
   ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
@@ -19,68 +20,83 @@ env:
 
 jobs:
   build:
+    name: Build & Push Image
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-            python-version: ${{env.python_version}}  # or $python_version
-      - name: Install pytest
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: unit test
+
+      - name: Run unit tests
         run: pytest test.py
-      - name: Configure AWS credentials using OIDC
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: ${{ secrets.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
-  
+
       - name: Build Docker image
         run: |
-            docker build -t ${{ env.IMAGE_NAME }} .
+          docker build -t ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
 
-      - name: Tag Docker image
+      - name: Tag image for ECR
         run: |
-          docker tag ${{ env.IMAGE_NAME }}:latest ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-         
-      - name: Scan Docker image with Trivy
+          docker tag \
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            ${{ env.ECR_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.ECR_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           format: table
-          exit-code: '1' 
           severity: CRITICAL,HIGH
+          exit-code: '1'
 
-      - name: Push Docker image to Amazon ECR
+      - name: Push image to Amazon ECR
         run: |
-            docker push ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
+          docker push \
+            ${{ env.ECR_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-ecs_deploy:
-  needs: build
-  runs-on: ubuntu-latest
-  steps:
-      - uses: actions/checkout@v4
-      - name: Configure AWS credentials using OIDC
-      - uses: aws-actions/configure-aws-credentials@v2
+  deploy:
+    name: Deploy to ECS
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-        role-to-assume: ${{ secrets.ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
-      - name: Render ECS task definition with new image
+          role-to-assume: ${{ secrets.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Render ECS task definition
         id: taskdef
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: ecs-taskdef.json
           container-name: app
-          image: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-            
-      - name: Deploy to ECS Service
+          image: ${{ env.ECR_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Deploy ECS service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-         task-definition: ${{ steps.taskdef.outputs.task-definition }}
-         cluster: nginx-fargate-cluster
-         service: nginx=fargate-service
-         wait-for-service-stability: true
+          task-definition: ${{ steps.taskdef.outputs.task-definition }}
+          cluster: nginx-fargate-cluster
+          service: nginx-fargate-service
+          wait-for-service-stability: true
